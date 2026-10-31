@@ -1,0 +1,225 @@
+/* ========== ショッピングリストアプリ - クリーム×テラコッタのライトテーマ ========== */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #F6F1E8;
+  --bg-card: #FFFFFF;
+  --accent: #A8432B;
+  --text-primary: #3B2F27;
+  --text-secondary: #8A7F73;
+  --line: #E7DFD2;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Noto Sans JP', Arial, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ========== チップ（フィルター・購入先選択） ========== */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--line);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.chip:hover {
+  border-color: #C9BCA8;
+}
+
+.chip-active {
+  border-color: var(--text-primary);
+  border-width: 2px;
+  font-weight: 700;
+}
+
+/* 小さめのチップ（カテゴリー選択など） */
+.chip-sm {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+/* ========== テラコッタボタン ========== */
+.btn-brand {
+  background: var(--accent);
+  color: #FFFFFF;
+  border-radius: 9999px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+}
+
+.btn-brand:hover {
+  background: #8F3620;
+}
+
+.btn-brand:active {
+  transform: scale(0.97);
+}
+
+.btn-brand:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ========== 白カード ========== */
+.card {
+  background: var(--bg-card);
+  border-radius: 20px;
+  box-shadow: 0 2px 12px rgba(59, 47, 39, 0.06);
+}
+
+/* ========== チェックサークル ========== */
+.check-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--text-primary);
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.check-circle:hover {
+  background: rgba(59, 47, 39, 0.06);
+}
+
+.check-circle.checked {
+  background: #3E7C4F;
+  border-color: #3E7C4F;
+  color: #FFFFFF;
+}
+
+/* ========== 入力フォーム ========== */
+.text-input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1.5px solid var(--line);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.text-input:focus {
+  border-color: var(--text-primary);
+}
+
+.text-input::placeholder {
+  color: #B8AC9C;
+}
+
+/* ========== 下部シート ========== */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(59, 47, 39, 0.4);
+  z-index: 60;
+}
+
+.sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 70;
+  background: var(--bg-primary);
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -8px 32px rgba(59, 47, 39, 0.18);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+/* ========== スイッチ（トグル） ========== */
+.switch {
+  position: relative;
+  width: 48px;
+  height: 28px;
+  border-radius: 9999px;
+  background: #D8CFC0;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+  border: none;
+}
+
+.switch.on {
+  background: var(--text-primary);
+}
+
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.switch.on .switch-knob {
+  transform: translateX(20px);
+}
+
+/* ========== トースト ========== */
+.toast {
+  position: fixed;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(59, 47, 39, 0.92);
+  color: #FFFFFF;
+  padding: 10px 24px;
+  border-radius: 9999px;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 90;
+  white-space: nowrap;
+}
+
+/* ========== スクロールバーを消す（横スクロールチップ用） ========== */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
