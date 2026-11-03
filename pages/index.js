@@ -3,8 +3,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   BellIcon,
-  SlidersIcon,
-  MicIcon,
   PencilIcon,
   AppleIcon,
   CheckIcon,
@@ -12,20 +10,9 @@ import {
   ChevronUpIcon,
   LinkIcon,
   MemoIcon,
+  TrashIcon,
 } from '../components/Icons'
-import useSpeechRecognition from '../components/useSpeechRecognition'
-
-// カテゴリーごとの表示絵文字
-const CATEGORY_EMOJI = {
-  '野菜・果物': '🥬',
-  '肉・魚': '🥩',
-  '豆腐・納豆・卵': '🍳',
-  '調味料・食品': '🧂',
-  '日用品・医薬品': '🧴',
-  '家・生活用品': '🧹',
-  'その他': '🛒',
-}
-const itemEmoji = (category) => CATEGORY_EMOJI[category] || '🛒'
+import { itemEmoji } from '../lib/emoji'
 
 const todayStr = () => {
   const d = new Date()
@@ -49,6 +36,14 @@ export default function ShoppingList() {
   const [sheetCategory, setSheetCategory] = useState('')
   const [sheetMemo, setSheetMemo] = useState('')
   const [showMemo, setShowMemo] = useState(false)
+  // 購入アニメーション中の商品ID（取り消し線を表示している間）
+  const [completingIds, setCompletingIds] = useState([])
+  // 通知設定
+  const [showNotifSheet, setShowNotifSheet] = useState(false)
+  const [notifEnabled, setNotifEnabled] = useState(false)
+  const [notifTime, setNotifTime] = useState('18:00')
+  // プッシュ通知（アプリを閉じていても届く方）
+  const [pushEnabled, setPushEnabled] = useState(false)
 
   // データ取得
   const fetchItems = useCallback(async () => {
@@ -77,17 +72,155 @@ export default function ShoppingList() {
     fetchSettings()
   }, [fetchItems, fetchSettings])
 
-  // 音声認識（シート外の「話して追加」）
-  const voiceAdd = useSpeechRecognition({
-    onResult: (text) => {
-      setSheetName(text)
-      setShowSheet(true)
-    },
-  })
-  // 音声認識（シート内の入力欄マイク）
-  const voiceSheet = useSpeechRecognition({
-    onResult: (text) => setSheetName(text),
-  })
+  // 通知設定の読み込み（localStorage）
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('shopping-notif') || '{}')
+      if (saved.enabled) setNotifEnabled(true)
+      if (saved.time) setNotifTime(saved.time)
+    } catch (e) {
+      // 破損時はデフォルト値を使用
+    }
+  }, [])
+
+  // 通知設定の保存
+  useEffect(() => {
+    localStorage.setItem(
+      'shopping-notif',
+      JSON.stringify({ enabled: notifEnabled, time: notifTime })
+    )
+  }, [notifEnabled, notifTime])
+
+  // サービスワーカー登録（プッシュ通知用）
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+  }, [])
+
+  // 既にプッシュ購読済みかどうかを確認
+  useEffect(() => {
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      navigator.serviceWorker
+        .ready
+        .then((reg) => reg.pushManager.getSubscription())
+        .then((sub) => setPushEnabled(!!sub))
+        .catch(() => {})
+    }
+  }, [])
+
+  // リマインダー：指定時刻に1日1回だけ通知
+  useEffect(() => {
+    if (!notifEnabled) return
+    const tick = () => {
+      const now = new Date()
+      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(
+        now.getMinutes()
+      ).padStart(2, '0')}`
+      const today = todayStr()
+      if (
+        hhmm === notifTime &&
+        !pushEnabled &&
+        localStorage.getItem('shopping-notif-last') !== today
+      ) {
+        localStorage.setItem('shopping-notif-last', today)
+        const count = items.filter((i) => !i.purchased).length
+        if (
+          typeof Notification !== 'undefined' &&
+          Notification.permission === 'granted' &&
+          count > 0
+        ) {
+          new Notification('お買い物リスト', {
+            body: `未購入のアイテムが${count}件あります 🛒`,
+          })
+        }
+      }
+    }
+    tick()
+    const timer = setInterval(tick, 20000)
+    return () => clearInterval(timer)
+  }, [notifEnabled, notifTime, items, pushEnabled])
+
+  // 通知オン/オフ（初回オン時にブラウザへ許可を要求）
+  const toggleNotif = async () => {
+    if (!notifEnabled) {
+      if (typeof Notification === 'undefined') {
+        alert('このブラウザは通知に対応していません')
+        return
+      }
+      const perm = await Notification.requestPermission()
+      if (perm !== 'granted') {
+        alert('通知が許可されませんでした。ブラウザの設定で許可してください')
+        return
+      }
+    }
+    setNotifEnabled(!notifEnabled)
+  }
+
+  // ===== プッシュ通知（アプリを閉じていても届く） =====
+  const urlBase64ToUint8Array = (base64String) => {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+    const raw = window.atob(base64)
+    const arr = new Uint8Array(raw.length)
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i)
+    return arr
+  }
+
+  const togglePush = async () => {
+    try {
+      if (!pushEnabled) {
+        const reg = await navigator.serviceWorker.ready
+        const keyRes = await fetch('/api/push')
+        const { publicKey, error } = await keyRes.json()
+        if (!publicKey) {
+          alert(error || 'プッシュ通知を有効にできませんでした')
+          return
+        }
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        })
+        await fetch('/api/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON(), time: notifTime }),
+        })
+        setPushEnabled(true)
+      } else {
+        const reg = await navigator.serviceWorker.ready
+        const sub = await reg.pushManager.getSubscription()
+        if (sub) {
+          await fetch('/api/push', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          })
+          sub.unsubscribe()
+        }
+        setPushEnabled(false)
+      }
+    } catch (e) {
+      alert(
+        'プッシュ通知を有効にできませんでした。HTTPSでアクセスしているか、通知が許可されているかご確認ください'
+      )
+    }
+  }
+
+  const updatePushTime = async (time) => {
+    try {
+      const reg = await navigator.serviceWorker.ready
+      const sub = await reg.pushManager.getSubscription()
+      if (!sub) return
+      await fetch('/api/push', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint, time }),
+      })
+    } catch (e) {
+      // 失敗してもアプリ内通知は継続
+    }
+  }
 
   // ===== 派生データ =====
   const activeItems = useMemo(() => items.filter((i) => !i.purchased), [items])
@@ -132,22 +265,53 @@ export default function ShoppingList() {
   }, [groupByStore, filteredItems, stores, categories])
 
   // ===== アクション =====
-  const togglePurchased = async (item) => {
+  const markPurchased = async (item) => {
     try {
-      const purchased = !item.purchased
       await fetch('/api/items', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: item.id,
-          purchased,
-          purchased_date: purchased ? todayStr() : null,
+          purchased: true,
+          purchased_date: todayStr(),
         }),
       })
       fetchItems()
     } catch (e) {
-      console.error('Error toggling purchased:', e)
+      console.error('Error marking purchased:', e)
     }
+  }
+
+  const unmarkPurchased = async (item) => {
+    try {
+      await fetch('/api/items', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: item.id,
+          purchased: false,
+          purchased_date: null,
+        }),
+      })
+      fetchItems()
+    } catch (e) {
+      console.error('Error unmarking purchased:', e)
+    }
+  }
+
+  // 購入チェック：取り消し線アニメーションを見せてからリストから消す
+  const togglePurchased = (item) => {
+    if (item.purchased) {
+      // 「今日買ったもの」からのチェック外しは即時
+      unmarkPurchased(item)
+      return
+    }
+    if (completingIds.includes(item.id)) return
+    setCompletingIds((prev) => [...prev, item.id])
+    setTimeout(() => {
+      markPurchased(item)
+      setCompletingIds((prev) => prev.filter((id) => id !== item.id))
+    }, 650)
   }
 
   const deleteItem = async (id) => {
@@ -206,38 +370,66 @@ export default function ShoppingList() {
   }
 
   // ===== 商品行 =====
-  const ItemRow = ({ item }) => (
-    <div className="flex items-center gap-3 py-3 px-1 border-b border-line last:border-0">
-      <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0">
-        {itemEmoji(item.category)}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-text-primary truncate">{item.name}</div>
-        {item.memo && (
-          <div className="text-xs text-text-secondary truncate">📝 {item.memo}</div>
-        )}
-      </div>
-      <button
-        className="check-circle"
-        onClick={() => togglePurchased(item)}
-        aria-label="購入済みにする"
-      />
-    </div>
-  )
+  const ItemRow = ({ item }) => {
+    const completing = completingIds.includes(item.id)
+    return (
+      <motion.div
+        initial={{ opacity: 0, height: 0 }}
+        animate={{ opacity: 1, height: 'auto' }}
+        exit={{ opacity: 0, height: 0 }}
+        transition={{ duration: 0.25 }}
+        className="overflow-hidden"
+      >
+        <div className="flex items-center gap-3 py-3 px-1 border-b border-line last:border-0">
+          <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0">
+            {itemEmoji(item.category, item.name)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div
+              className={`font-medium text-text-primary truncate ${
+                completing ? 'strike' : ''
+              }`}
+            >
+              {item.name}
+            </div>
+            {item.memo && (
+              <div className="text-xs text-text-secondary truncate">📝 {item.memo}</div>
+            )}
+          </div>
+          <button
+            onClick={() => deleteItem(item.id)}
+            className="text-text-secondary hover:text-accent transition-colors flex-shrink-0 p-1"
+            aria-label={`${item.name}を削除`}
+          >
+            <TrashIcon size={18} />
+          </button>
+          <button
+            className={`check-circle ${completing ? 'checked' : ''}`}
+            onClick={() => togglePurchased(item)}
+            aria-label="購入済みにする"
+          >
+            {completing && <CheckIcon size={14} />}
+          </button>
+        </div>
+      </motion.div>
+    )
+  }
 
   return (
     <div>
       {/* ヘッダー */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold text-text-primary">買い物リスト</h1>
-        <div className="flex items-center gap-4 text-text-primary">
-          <button aria-label="通知">
-            <BellIcon size={22} />
-          </button>
-          <button aria-label="表示設定">
-            <SlidersIcon size={22} />
-          </button>
-        </div>
+        <button
+          onClick={() => setShowNotifSheet(true)}
+          className="text-text-primary relative"
+          aria-label="通知設定"
+        >
+          <BellIcon size={22} />
+          {notifEnabled && (
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-accent" />
+          )}
+        </button>
       </div>
 
       {/* 購入先フィルター */}
@@ -325,9 +517,11 @@ export default function ShoppingList() {
                       {category === '未分類' ? 'カテゴリー未設定' : category}
                     </div>
                     <div className="card px-3">
-                      {catItems.map((item) => (
-                        <ItemRow key={item.id} item={item} />
-                      ))}
+                      <AnimatePresence initial={false}>
+                        {catItems.map((item) => (
+                          <ItemRow key={item.id} item={item} />
+                        ))}
+                      </AnimatePresence>
                     </div>
                   </div>
                 ))}
@@ -340,9 +534,11 @@ export default function ShoppingList() {
       {/* 商品リスト（フラット表示） */}
       {!groupByStore && filteredItems.length > 0 && (
         <div className="card px-3 mb-5">
-          {filteredItems.map((item) => (
-            <ItemRow key={item.id} item={item} />
-          ))}
+          <AnimatePresence initial={false}>
+            {filteredItems.map((item) => (
+              <ItemRow key={item.id} item={item} />
+            ))}
+          </AnimatePresence>
         </div>
       )}
 
@@ -377,7 +573,7 @@ export default function ShoppingList() {
                   {todayPurchased.map((item) => (
                     <div key={item.id} className="flex items-center gap-3 py-3 px-1 border-b border-line last:border-0">
                       <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0">
-                        {itemEmoji(item.category)}
+                        {itemEmoji(item.category, item.name)}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-text-primary truncate">{item.name}</div>
@@ -398,23 +594,15 @@ export default function ShoppingList() {
         </div>
       )}
 
-      {/* 下部の追加ボタン */}
-      <div className="fixed bottom-24 left-0 right-0 z-30 pointer-events-none">
-        <div className="max-w-md mx-auto flex justify-center gap-3 px-4">
-          <button
-            onClick={() => (voiceAdd.listening ? voiceAdd.stop() : voiceAdd.start())}
-            className={`pointer-events-auto flex items-center gap-2 px-5 py-3 rounded-full border-2 font-bold shadow-float transition-all ${
-              voiceAdd.listening
-                ? 'bg-accent text-white border-accent'
-                : 'bg-bg-card text-accent border-accent'
-            }`}
-          >
-            <MicIcon size={18} />
-            {voiceAdd.listening ? '聞いています…' : '話して追加'}
-          </button>
+      {/* 下部の追加ボタン（下部タブナビと重ならない位置に固定） */}
+      <div
+        className="fixed left-0 right-0 z-30 pointer-events-none"
+        style={{ bottom: 'calc(6.5rem + env(safe-area-inset-bottom))' }}
+      >
+        <div className="max-w-md mx-auto flex justify-center px-4">
           <button
             onClick={openSheet}
-            className="pointer-events-auto btn-brand flex items-center gap-2 px-5 py-3 shadow-float"
+            className="pointer-events-auto btn-brand flex items-center gap-2 px-6 py-3 shadow-float"
           >
             <PencilIcon size={18} />
             入力して追加
@@ -458,7 +646,7 @@ export default function ShoppingList() {
                     {sheetItems.map((item) => (
                       <div key={item.id} className="flex items-center gap-3 py-2.5 border-b border-line last:border-0">
                         <div className="w-9 h-9 rounded-lg bg-bg-card-soft flex items-center justify-center text-lg flex-shrink-0">
-                          {itemEmoji(item.category)}
+                          {itemEmoji(item.category, item.name)}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-text-primary truncate">{item.name}</div>
@@ -509,9 +697,9 @@ export default function ShoppingList() {
                   </div>
                 </div>
 
-                {/* 商品名入力 + マイク */}
+                {/* 商品名入力 */}
                 <div className="flex items-center gap-2 mb-3">
-                  <div className="relative flex-1">
+                  <div className="flex-1">
                     <input
                       type="text"
                       value={sheetName}
@@ -519,17 +707,8 @@ export default function ShoppingList() {
                       onKeyDown={(e) => e.key === 'Enter' && addFromSheet()}
                       placeholder="商品名"
                       autoFocus
-                      className="text-input pr-12"
+                      className="text-input"
                     />
-                    <button
-                      onClick={() => (voiceSheet.listening ? voiceSheet.stop() : voiceSheet.start())}
-                      className={`absolute right-3 top-1/2 -translate-y-1/2 ${
-                        voiceSheet.listening ? 'text-accent animate-pulse' : 'text-text-secondary'
-                      }`}
-                      aria-label="音声入力"
-                    >
-                      <MicIcon size={20} />
-                    </button>
                   </div>
                   <button
                     onClick={() => setShowMemo(!showMemo)}
@@ -568,6 +747,91 @@ export default function ShoppingList() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* 通知設定シート */}
+      <AnimatePresence>
+        {showNotifSheet && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="sheet-overlay"
+              onClick={() => setShowNotifSheet(false)}
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'tween', duration: 0.25 }}
+              className="sheet"
+            >
+              <div className="px-4 pt-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-lg font-bold text-text-primary">通知設定</h2>
+                  <button onClick={() => setShowNotifSheet(false)} className="chip">
+                    閉じる
+                  </button>
+                </div>
+
+                <div className="card p-4 mb-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-text-primary">お買い物リマインダー</div>
+                      <div className="text-xs text-text-secondary mt-1">
+                        指定した時刻に、未購入アイテム数を通知します
+                      </div>
+                    </div>
+                    <button
+                      className={`switch ${notifEnabled ? 'on' : ''}`}
+                      onClick={toggleNotif}
+                      aria-label="通知のオンオフ"
+                    >
+                      <span className="switch-knob" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between mt-4">
+                    <span className="text-sm text-text-secondary">通知時刻</span>
+                    <input
+                      type="time"
+                      value={notifTime}
+                      onChange={(e) => {
+                        setNotifTime(e.target.value)
+                        if (pushEnabled) updatePushTime(e.target.value)
+                      }}
+                      disabled={!notifEnabled && !pushEnabled}
+                      className="text-input w-32 text-center"
+                    />
+                  </div>
+                </div>
+
+                <div className="card p-4 mb-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-text-primary">プッシュ通知（閉じていてもOK）</div>
+                      <div className="text-xs text-text-secondary mt-1">
+                        上と同じ時刻に、ホーム画面のアプリへ通知します
+                      </div>
+                    </div>
+                    <button
+                      className={`switch ${pushEnabled ? 'on' : ''}`}
+                      onClick={togglePush}
+                      aria-label="プッシュ通知のオンオフ"
+                    >
+                      <span className="switch-knob" />
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-xs text-text-secondary leading-relaxed px-1 pb-2">
+                  ※ 上のリマインダーはアプリを開いている間、下のプッシュ通知はアプリを閉じていても届きます（アプリのサーバー（PC）が起動している間に送信されます）。プッシュ通知には HTTPS 接続が必要です。
+                </p>
               </div>
             </motion.div>
           </>

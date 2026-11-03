@@ -2,17 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PlusIcon, TrashIcon, CloseIcon, CartIcon } from '../components/Icons'
-
-const CATEGORY_EMOJI = {
-  '野菜・果物': '🥬',
-  '肉・魚': '🥩',
-  '豆腐・納豆・卵': '🍳',
-  '調味料・食品': '🧂',
-  '日用品・医薬品': '🧴',
-  '家・生活用品': '🧹',
-  'その他': '🛒',
-}
-const itemEmoji = (category) => CATEGORY_EMOJI[category] || '🛒'
+import { itemEmoji } from '../lib/emoji'
 
 export default function Recurring() {
   const [items, setItems] = useState([])
@@ -216,7 +206,7 @@ export default function Recurring() {
               className="flex items-center gap-3 py-3 border-b border-line last:border-0"
             >
               <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0">
-                {itemEmoji(item.category)}
+                {itemEmoji(item.category, item.name)}
               </div>
               <button onClick={() => openEditForm(item)} className="flex-1 min-w-0 text-left">
                 <div className="font-medium text-text-primary truncate">{item.name}</div>

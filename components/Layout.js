@@ -14,7 +14,7 @@ export default function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-bg-primary">
-      <main className="max-w-md mx-auto px-4 pt-5 pb-32">
+      <main className="max-w-md mx-auto px-4 pt-5 pb-44">
         {children}
       </main>
 
