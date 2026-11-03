@@ -2,7 +2,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  BellIcon,
   PencilIcon,
   AppleIcon,
   CheckIcon,
@@ -38,12 +37,6 @@ export default function ShoppingList() {
   const [showMemo, setShowMemo] = useState(false)
   // 購入アニメーション中の商品ID（取り消し線を表示している間）
   const [completingIds, setCompletingIds] = useState([])
-  // 通知設定
-  const [showNotifSheet, setShowNotifSheet] = useState(false)
-  const [notifEnabled, setNotifEnabled] = useState(false)
-  const [notifTime, setNotifTime] = useState('18:00')
-  // プッシュ通知（アプリを閉じていても届く方）
-  const [pushEnabled, setPushEnabled] = useState(false)
 
   // データ取得
   const fetchItems = useCallback(async () => {
@@ -71,156 +64,6 @@ export default function ShoppingList() {
     fetchItems()
     fetchSettings()
   }, [fetchItems, fetchSettings])
-
-  // 通知設定の読み込み（localStorage）
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('shopping-notif') || '{}')
-      if (saved.enabled) setNotifEnabled(true)
-      if (saved.time) setNotifTime(saved.time)
-    } catch (e) {
-      // 破損時はデフォルト値を使用
-    }
-  }, [])
-
-  // 通知設定の保存
-  useEffect(() => {
-    localStorage.setItem(
-      'shopping-notif',
-      JSON.stringify({ enabled: notifEnabled, time: notifTime })
-    )
-  }, [notifEnabled, notifTime])
-
-  // サービスワーカー登録（プッシュ通知用）
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {})
-    }
-  }, [])
-
-  // 既にプッシュ購読済みかどうかを確認
-  useEffect(() => {
-    if ('serviceWorker' in navigator && 'PushManager' in window) {
-      navigator.serviceWorker
-        .ready
-        .then((reg) => reg.pushManager.getSubscription())
-        .then((sub) => setPushEnabled(!!sub))
-        .catch(() => {})
-    }
-  }, [])
-
-  // リマインダー：指定時刻に1日1回だけ通知
-  useEffect(() => {
-    if (!notifEnabled) return
-    const tick = () => {
-      const now = new Date()
-      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(
-        now.getMinutes()
-      ).padStart(2, '0')}`
-      const today = todayStr()
-      if (
-        hhmm === notifTime &&
-        !pushEnabled &&
-        localStorage.getItem('shopping-notif-last') !== today
-      ) {
-        localStorage.setItem('shopping-notif-last', today)
-        const count = items.filter((i) => !i.purchased).length
-        if (
-          typeof Notification !== 'undefined' &&
-          Notification.permission === 'granted' &&
-          count > 0
-        ) {
-          new Notification('お買い物リスト', {
-            body: `未購入のアイテムが${count}件あります 🛒`,
-          })
-        }
-      }
-    }
-    tick()
-    const timer = setInterval(tick, 20000)
-    return () => clearInterval(timer)
-  }, [notifEnabled, notifTime, items, pushEnabled])
-
-  // 通知オン/オフ（初回オン時にブラウザへ許可を要求）
-  const toggleNotif = async () => {
-    if (!notifEnabled) {
-      if (typeof Notification === 'undefined') {
-        alert('このブラウザは通知に対応していません')
-        return
-      }
-      const perm = await Notification.requestPermission()
-      if (perm !== 'granted') {
-        alert('通知が許可されませんでした。ブラウザの設定で許可してください')
-        return
-      }
-    }
-    setNotifEnabled(!notifEnabled)
-  }
-
-  // ===== プッシュ通知（アプリを閉じていても届く） =====
-  const urlBase64ToUint8Array = (base64String) => {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-    const raw = window.atob(base64)
-    const arr = new Uint8Array(raw.length)
-    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i)
-    return arr
-  }
-
-  const togglePush = async () => {
-    try {
-      if (!pushEnabled) {
-        const reg = await navigator.serviceWorker.ready
-        const keyRes = await fetch('/api/push')
-        const { publicKey, error } = await keyRes.json()
-        if (!publicKey) {
-          alert(error || 'プッシュ通知を有効にできませんでした')
-          return
-        }
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey),
-        })
-        await fetch('/api/push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ subscription: sub.toJSON(), time: notifTime }),
-        })
-        setPushEnabled(true)
-      } else {
-        const reg = await navigator.serviceWorker.ready
-        const sub = await reg.pushManager.getSubscription()
-        if (sub) {
-          await fetch('/api/push', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: sub.endpoint }),
-          })
-          sub.unsubscribe()
-        }
-        setPushEnabled(false)
-      }
-    } catch (e) {
-      alert(
-        'プッシュ通知を有効にできませんでした。HTTPSでアクセスしているか、通知が許可されているかご確認ください'
-      )
-    }
-  }
-
-  const updatePushTime = async (time) => {
-    try {
-      const reg = await navigator.serviceWorker.ready
-      const sub = await reg.pushManager.getSubscription()
-      if (!sub) return
-      await fetch('/api/push', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: sub.endpoint, time }),
-      })
-    } catch (e) {
-      // 失敗してもアプリ内通知は継続
-    }
-  }
 
   // ===== 派生データ =====
   const activeItems = useMemo(() => items.filter((i) => !i.purchased), [items])
@@ -418,18 +261,8 @@ export default function ShoppingList() {
   return (
     <div>
       {/* ヘッダー */}
-      <div className="flex justify-between items-center mb-4">
+      <div className="mb-4">
         <h1 className="text-2xl font-bold text-text-primary">買い物リスト</h1>
-        <button
-          onClick={() => setShowNotifSheet(true)}
-          className="text-text-primary relative"
-          aria-label="通知設定"
-        >
-          <BellIcon size={22} />
-          {notifEnabled && (
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-accent" />
-          )}
-        </button>
       </div>
 
       {/* 購入先フィルター */}
@@ -753,90 +586,6 @@ export default function ShoppingList() {
         )}
       </AnimatePresence>
 
-      {/* 通知設定シート */}
-      <AnimatePresence>
-        {showNotifSheet && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="sheet-overlay"
-              onClick={() => setShowNotifSheet(false)}
-            />
-            <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'tween', duration: 0.25 }}
-              className="sheet"
-            >
-              <div className="px-4 pt-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-bold text-text-primary">通知設定</h2>
-                  <button onClick={() => setShowNotifSheet(false)} className="chip">
-                    閉じる
-                  </button>
-                </div>
-
-                <div className="card p-4 mb-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-bold text-text-primary">お買い物リマインダー</div>
-                      <div className="text-xs text-text-secondary mt-1">
-                        指定した時刻に、未購入アイテム数を通知します
-                      </div>
-                    </div>
-                    <button
-                      className={`switch ${notifEnabled ? 'on' : ''}`}
-                      onClick={toggleNotif}
-                      aria-label="通知のオンオフ"
-                    >
-                      <span className="switch-knob" />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-4">
-                    <span className="text-sm text-text-secondary">通知時刻</span>
-                    <input
-                      type="time"
-                      value={notifTime}
-                      onChange={(e) => {
-                        setNotifTime(e.target.value)
-                        if (pushEnabled) updatePushTime(e.target.value)
-                      }}
-                      disabled={!notifEnabled && !pushEnabled}
-                      className="text-input w-32 text-center"
-                    />
-                  </div>
-                </div>
-
-                <div className="card p-4 mb-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-bold text-text-primary">プッシュ通知（閉じていてもOK）</div>
-                      <div className="text-xs text-text-secondary mt-1">
-                        上と同じ時刻に、ホーム画面のアプリへ通知します
-                      </div>
-                    </div>
-                    <button
-                      className={`switch ${pushEnabled ? 'on' : ''}`}
-                      onClick={togglePush}
-                      aria-label="プッシュ通知のオンオフ"
-                    >
-                      <span className="switch-knob" />
-                    </button>
-                  </div>
-                </div>
-
-                <p className="text-xs text-text-secondary leading-relaxed px-1 pb-2">
-                  ※ 上のリマインダーはアプリを開いている間、下のプッシュ通知はアプリを閉じていても届きます（アプリのサーバー（PC）が起動している間に送信されます）。プッシュ通知には HTTPS 接続が必要です。
-                </p>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
   )
 }
