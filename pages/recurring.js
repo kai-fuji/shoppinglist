@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PlusIcon, TrashIcon, CloseIcon, CartIcon } from '../components/Icons'
-import { itemEmoji } from '../lib/emoji'
+import { itemEmoji, itemImage } from '../lib/emoji'
 
 export default function Recurring() {
   const [items, setItems] = useState([])
@@ -205,8 +205,12 @@ export default function Recurring() {
               transition={{ delay: index * 0.03 }}
               className="flex items-center gap-3 py-3 border-b border-line last:border-0"
             >
-              <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0">
-                {itemEmoji(item.category, item.name)}
+              <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
+                {itemImage(item.name) ? (
+                  <img src={itemImage(item.name)} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  itemEmoji(item.category, item.name)
+                )}
               </div>
               <button onClick={() => openEditForm(item)} className="flex-1 min-w-0 text-left">
                 <div className="font-medium text-text-primary truncate">{item.name}</div>

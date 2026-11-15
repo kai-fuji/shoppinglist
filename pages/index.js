@@ -1,5 +1,5 @@
 // pages/index.js - 買い物リスト（メイン画面）
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   PencilIcon,
@@ -11,12 +11,64 @@ import {
   MemoIcon,
   TrashIcon,
 } from '../components/Icons'
-import { itemEmoji } from '../lib/emoji'
+import { itemEmoji, itemImage } from '../lib/emoji'
 
 const todayStr = () => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+
+// ===== 商品行 =====
+// 親コンポーネントの中で定義すると再描画のたびに全行がアンマウント→再マウントされ、
+// framer-motion の height:0→auto アニメが毎回再生されてリストが一瞬縮み、
+// スクロールが上に戻る・ガタつく原因になるため、外に出してメモ化する
+const ItemRow = memo(function ItemRow({ item, completing, onToggle, onDelete }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.25 }}
+      className="overflow-hidden"
+    >
+      <div className="flex items-center gap-3 py-3 px-1 border-b border-line last:border-0">
+        <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
+          {itemImage(item.name) ? (
+            <img src={itemImage(item.name)} alt="" className="w-full h-full object-cover" />
+          ) : (
+            itemEmoji(item.category, item.name)
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div
+            className={`font-medium text-text-primary truncate ${
+              completing ? 'strike' : ''
+            }`}
+          >
+            {item.name}
+          </div>
+          {item.memo && (
+            <div className="text-xs text-text-secondary truncate">📝 {item.memo}</div>
+          )}
+        </div>
+        <button
+          onClick={() => onDelete(item.id)}
+          className="text-text-secondary hover:text-accent transition-colors flex-shrink-0 p-1"
+          aria-label={`${item.name}を削除`}
+        >
+          <TrashIcon size={18} />
+        </button>
+        <button
+          className={`check-circle ${completing ? 'checked' : ''}`}
+          onClick={() => onToggle(item)}
+          aria-label="購入済みにする"
+        >
+          {completing && <CheckIcon size={14} />}
+        </button>
+      </div>
+    </motion.div>
+  )
+})
 
 export default function ShoppingList() {
   const [items, setItems] = useState([])
@@ -108,7 +160,7 @@ export default function ShoppingList() {
   }, [groupByStore, filteredItems, stores, categories])
 
   // ===== アクション =====
-  const markPurchased = async (item) => {
+  const markPurchased = useCallback(async (item) => {
     try {
       await fetch('/api/items', {
         method: 'PUT',
@@ -123,9 +175,9 @@ export default function ShoppingList() {
     } catch (e) {
       console.error('Error marking purchased:', e)
     }
-  }
+  }, [fetchItems])
 
-  const unmarkPurchased = async (item) => {
+  const unmarkPurchased = useCallback(async (item) => {
     try {
       await fetch('/api/items', {
         method: 'PUT',
@@ -140,31 +192,37 @@ export default function ShoppingList() {
     } catch (e) {
       console.error('Error unmarking purchased:', e)
     }
-  }
+  }, [fetchItems])
 
   // 購入チェック：取り消し線アニメーションを見せてからリストから消す
-  const togglePurchased = (item) => {
-    if (item.purchased) {
-      // 「今日買ったもの」からのチェック外しは即時
-      unmarkPurchased(item)
-      return
-    }
-    if (completingIds.includes(item.id)) return
-    setCompletingIds((prev) => [...prev, item.id])
-    setTimeout(() => {
-      markPurchased(item)
-      setCompletingIds((prev) => prev.filter((id) => id !== item.id))
-    }, 650)
-  }
+  const togglePurchased = useCallback(
+    (item) => {
+      if (item.purchased) {
+        // 「今日買ったもの」からのチェック外しは即時
+        unmarkPurchased(item)
+        return
+      }
+      if (completingIds.includes(item.id)) return
+      setCompletingIds((prev) => [...prev, item.id])
+      setTimeout(() => {
+        markPurchased(item)
+        setCompletingIds((prev) => prev.filter((id) => id !== item.id))
+      }, 650)
+    },
+    [completingIds, markPurchased, unmarkPurchased]
+  )
 
-  const deleteItem = async (id) => {
-    try {
-      await fetch(`/api/items?id=${id}`, { method: 'DELETE' })
-      fetchItems()
-    } catch (e) {
-      console.error('Error deleting item:', e)
-    }
-  }
+  const deleteItem = useCallback(
+    async (id) => {
+      try {
+        await fetch(`/api/items?id=${id}`, { method: 'DELETE' })
+        fetchItems()
+      } catch (e) {
+        console.error('Error deleting item:', e)
+      }
+    },
+    [fetchItems]
+  )
 
   const openSheet = () => {
     setSheetName('')
@@ -184,14 +242,15 @@ export default function ShoppingList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, store: sheetStore, category: sheetCategory, memo: sheetMemo }),
       })
-      // 追加済みリストを更新して表示
+      // 再取得は1回だけにまとめる（二重fetchでリストが二度再描画されるのを防ぐ）
       const listRes = await fetch('/api/items')
       const list = await listRes.json()
-      setSheetItems(list.filter((i) => !i.purchased).slice(-20))
+      const listArr = Array.isArray(list) ? list : []
+      setItems(listArr)
+      setSheetItems(listArr.filter((i) => !i.purchased).slice(-20))
       setSheetName('')
       setSheetMemo('')
       setShowMemo(false)
-      fetchItems()
     } catch (e) {
       console.error('Error adding item:', e)
     }
@@ -210,52 +269,6 @@ export default function ShoppingList() {
 
   const toggleStoreCollapse = (store) => {
     setCollapsedStores((prev) => ({ ...prev, [store]: !prev[store] }))
-  }
-
-  // ===== 商品行 =====
-  const ItemRow = ({ item }) => {
-    const completing = completingIds.includes(item.id)
-    return (
-      <motion.div
-        initial={{ opacity: 0, height: 0 }}
-        animate={{ opacity: 1, height: 'auto' }}
-        exit={{ opacity: 0, height: 0 }}
-        transition={{ duration: 0.25 }}
-        className="overflow-hidden"
-      >
-        <div className="flex items-center gap-3 py-3 px-1 border-b border-line last:border-0">
-          <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0">
-            {itemEmoji(item.category, item.name)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div
-              className={`font-medium text-text-primary truncate ${
-                completing ? 'strike' : ''
-              }`}
-            >
-              {item.name}
-            </div>
-            {item.memo && (
-              <div className="text-xs text-text-secondary truncate">📝 {item.memo}</div>
-            )}
-          </div>
-          <button
-            onClick={() => deleteItem(item.id)}
-            className="text-text-secondary hover:text-accent transition-colors flex-shrink-0 p-1"
-            aria-label={`${item.name}を削除`}
-          >
-            <TrashIcon size={18} />
-          </button>
-          <button
-            className={`check-circle ${completing ? 'checked' : ''}`}
-            onClick={() => togglePurchased(item)}
-            aria-label="購入済みにする"
-          >
-            {completing && <CheckIcon size={14} />}
-          </button>
-        </div>
-      </motion.div>
-    )
   }
 
   return (
@@ -352,7 +365,13 @@ export default function ShoppingList() {
                     <div className="card px-3">
                       <AnimatePresence initial={false}>
                         {catItems.map((item) => (
-                          <ItemRow key={item.id} item={item} />
+                          <ItemRow
+                            key={item.id}
+                            item={item}
+                            completing={completingIds.includes(item.id)}
+                            onToggle={togglePurchased}
+                            onDelete={deleteItem}
+                          />
                         ))}
                       </AnimatePresence>
                     </div>
@@ -369,7 +388,13 @@ export default function ShoppingList() {
         <div className="card px-3 mb-5">
           <AnimatePresence initial={false}>
             {filteredItems.map((item) => (
-              <ItemRow key={item.id} item={item} />
+              <ItemRow
+                key={item.id}
+                item={item}
+                completing={completingIds.includes(item.id)}
+                onToggle={togglePurchased}
+                onDelete={deleteItem}
+              />
             ))}
           </AnimatePresence>
         </div>
@@ -405,8 +430,12 @@ export default function ShoppingList() {
                 <div className="card px-3 mt-2">
                   {todayPurchased.map((item) => (
                     <div key={item.id} className="flex items-center gap-3 py-3 px-1 border-b border-line last:border-0">
-                      <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0">
-                        {itemEmoji(item.category, item.name)}
+                      <div className="w-10 h-10 rounded-xl bg-bg-card-soft flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
+                        {itemImage(item.name) ? (
+                          <img src={itemImage(item.name)} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          itemEmoji(item.category, item.name)
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-text-primary truncate">{item.name}</div>
@@ -478,8 +507,12 @@ export default function ShoppingList() {
                   <div className="card px-3 mb-4 max-h-56 overflow-y-auto">
                     {sheetItems.map((item) => (
                       <div key={item.id} className="flex items-center gap-3 py-2.5 border-b border-line last:border-0">
-                        <div className="w-9 h-9 rounded-lg bg-bg-card-soft flex items-center justify-center text-lg flex-shrink-0">
-                          {itemEmoji(item.category, item.name)}
+                        <div className="w-9 h-9 rounded-lg bg-bg-card-soft flex items-center justify-center text-lg flex-shrink-0 overflow-hidden">
+                          {itemImage(item.name) ? (
+                            <img src={itemImage(item.name)} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            itemEmoji(item.category, item.name)
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-text-primary truncate">{item.name}</div>
