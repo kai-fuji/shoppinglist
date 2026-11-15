@@ -1,6 +1,7 @@
 // pages/mypage.js - マイページ（購入先・カテゴリーの管理、アプリ設定）
 import { useState, useEffect, useCallback } from 'react'
-import { StoreIcon, TagIcon, GearIcon, PlusIcon, CloseIcon } from '../components/Icons'
+import { StoreIcon, TagIcon, GearIcon, PlusIcon, CloseIcon, CartIcon } from '../components/Icons'
+import { itemEmoji, itemImage } from '../lib/emoji'
 
 export default function MyPage() {
   const [stores, setStores] = useState([])
@@ -8,6 +9,7 @@ export default function MyPage() {
   const [newStore, setNewStore] = useState('')
   const [newCategory, setNewCategory] = useState('')
   const [toast, setToast] = useState('')
+  const [history, setHistory] = useState([])
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -20,9 +22,41 @@ export default function MyPage() {
     }
   }, [])
 
+  // 購入履歴の取得（購入済みの商品を名前ごとに集計）
+  const fetchHistory = useCallback(async () => {
+    try {
+      const res = await fetch('/api/items')
+      const json = await res.json()
+      const arr = Array.isArray(json) ? json : []
+      const map = new Map()
+      for (const it of arr) {
+        if (!it.purchased) continue
+        const prev = map.get(it.name)
+        if (prev) {
+          prev.count += 1
+          if ((it.purchased_date || '') > prev.lastDate) prev.lastDate = it.purchased_date || ''
+        } else {
+          map.set(it.name, {
+            name: it.name,
+            store: it.store || '',
+            category: it.category || '',
+            count: 1,
+            lastDate: it.purchased_date || '',
+          })
+        }
+      }
+      setHistory(
+        Array.from(map.values()).sort((a, b) => (a.lastDate < b.lastDate ? 1 : -1))
+      )
+    } catch (e) {
+      console.error('Error fetching purchase history:', e)
+    }
+  }, [])
+
   useEffect(() => {
     fetchSettings()
-  }, [fetchSettings])
+    fetchHistory()
+  }, [fetchSettings, fetchHistory])
 
   const showToast = (msg) => {
     setToast(msg)
@@ -71,6 +105,7 @@ export default function MyPage() {
     if (!confirm('購入済みの履歴をすべて削除しますか？')) return
     try {
       await fetch('/api/items?purchased=1', { method: 'DELETE' })
+      setHistory([])
       showToast('購入済みの履歴を削除しました')
     } catch (e) {
       console.error('Error clearing purchased:', e)
@@ -175,6 +210,39 @@ export default function MyPage() {
             <PlusIcon size={18} />
           </button>
         </div>
+      </div>
+
+      {/* 過去の購入品 */}
+      <div className="card p-4 mb-4">
+        <div className="flex items-center gap-2 mb-3 text-text-primary">
+          <CartIcon size={18} />
+          <h2 className="font-bold">過去の購入品</h2>
+          <span className="text-xs text-text-secondary ml-auto">{history.length}品</span>
+        </div>
+        {history.length === 0 ? (
+          <p className="text-sm text-text-secondary">まだ購入履歴がありません</p>
+        ) : (
+          <div className="divide-y divide-line">
+            {history.map((h) => (
+              <div key={h.name} className="flex items-center gap-3 py-2.5">
+                <div className="w-9 h-9 rounded-lg bg-bg-card-soft flex items-center justify-center text-lg flex-shrink-0 overflow-hidden">
+                  {itemImage(h.name) ? (
+                    <img src={itemImage(h.name)} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    itemEmoji(h.category, h.name)
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-text-primary truncate">{h.name}</div>
+                  <div className="text-xs text-text-secondary">
+                    {[h.store, h.lastDate ? `最終購入 ${h.lastDate}` : ''].filter(Boolean).join(' ・ ')}
+                  </div>
+                </div>
+                <span className="chip chip-active text-xs flex-shrink-0">×{h.count}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* アプリ設定 */}

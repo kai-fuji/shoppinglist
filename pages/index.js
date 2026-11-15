@@ -7,7 +7,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  LinkIcon,
   MemoIcon,
   TrashIcon,
 } from '../components/Icons'
@@ -261,12 +260,6 @@ export default function ShoppingList() {
     setSheetItems((prev) => prev.filter((i) => i.id !== id))
   }
 
-  const searchWeb = () => {
-    const query = filteredItems.map((i) => i.name).join(' ')
-    if (!query) return
-    window.open(`https://www.google.com/search?tbm=shop&q=${encodeURIComponent(query)}`, '_blank')
-  }
-
   const toggleStoreCollapse = (store) => {
     setCollapsedStores((prev) => ({ ...prev, [store]: !prev[store] }))
   }
@@ -305,25 +298,6 @@ export default function ShoppingList() {
           <span className="switch-knob" />
         </button>
       </div>
-
-      {/* ネットで探すバー */}
-      {filteredItems.length > 0 && (
-        <div className="card flex items-center justify-between px-4 py-3 mb-4">
-          <div className="flex items-center gap-2 text-text-primary">
-            <LinkIcon size={18} />
-            <span className="font-medium">ネットで探す</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-text-secondary">{filteredItems.length}件</span>
-            <button
-              onClick={searchWeb}
-              className="text-sm font-medium text-text-primary border border-line rounded-full px-4 py-1.5 hover:bg-bg-card-soft transition-colors"
-            >
-              すべて見る
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 空の状態 */}
       {filteredItems.length === 0 && (
