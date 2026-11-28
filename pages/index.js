@@ -21,7 +21,7 @@ const todayStr = () => {
 // 親コンポーネントの中で定義すると再描画のたびに全行がアンマウント→再マウントされ、
 // framer-motion の height:0→auto アニメが毎回再生されてリストが一瞬縮み、
 // スクロールが上に戻る・ガタつく原因になるため、外に出してメモ化する
-const ItemRow = memo(function ItemRow({ item, completing, onToggle, onDelete }) {
+const ItemRow = memo(function ItemRow({ item, completing, onToggle, onDelete, onEdit }) {
   return (
     <motion.div
       initial={{ opacity: 0, height: 0 }}
@@ -38,7 +38,7 @@ const ItemRow = memo(function ItemRow({ item, completing, onToggle, onDelete }) 
             itemEmoji(item.category, item.name)
           )}
         </div>
-        <div className="flex-1 min-w-0">
+        <button onClick={() => onEdit(item)} className="flex-1 min-w-0 text-left">
           <div
             className={`font-medium text-text-primary truncate ${
               completing ? 'strike' : ''
@@ -49,7 +49,7 @@ const ItemRow = memo(function ItemRow({ item, completing, onToggle, onDelete }) 
           {item.memo && (
             <div className="text-xs text-text-secondary truncate">📝 {item.memo}</div>
           )}
-        </div>
+        </button>
         <button
           onClick={() => onDelete(item.id)}
           className="text-text-secondary hover:text-accent transition-colors flex-shrink-0 p-1"
@@ -88,6 +88,15 @@ export default function ShoppingList() {
   const [showMemo, setShowMemo] = useState(false)
   // 購入アニメーション中の商品ID（取り消し線を表示している間）
   const [completingIds, setCompletingIds] = useState([])
+
+  // 編集シート（追加シートと同じ見た目で、既存値を入れて開く）
+  const [editingItem, setEditingItem] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [editStore, setEditStore] = useState('')
+  const [editCategory, setEditCategory] = useState('')
+  const [editMemo, setEditMemo] = useState('')
+  const [showEditMemo, setShowEditMemo] = useState(false)
+  const [toast, setToast] = useState('')
 
   // データ取得
   const fetchItems = useCallback(async () => {
@@ -260,6 +269,43 @@ export default function ShoppingList() {
     setSheetItems((prev) => prev.filter((i) => i.id !== id))
   }
 
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 2000)
+  }
+
+  const openEditSheet = (item) => {
+    setEditingItem(item)
+    setEditName(item.name)
+    setEditStore(item.store || '')
+    setEditCategory(item.category || '')
+    setEditMemo(item.memo || '')
+    setShowEditMemo(!!item.memo)
+  }
+
+  const saveEdit = async () => {
+    const name = editName.trim()
+    if (!name || !editingItem) return
+    try {
+      await fetch('/api/items', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingItem.id,
+          name,
+          store: editStore,
+          category: editCategory,
+          memo: editMemo,
+        }),
+      })
+      setEditingItem(null)
+      fetchItems()
+      showToast('更新しました')
+    } catch (e) {
+      console.error('Error updating item:', e)
+    }
+  }
+
   const toggleStoreCollapse = (store) => {
     setCollapsedStores((prev) => ({ ...prev, [store]: !prev[store] }))
   }
@@ -345,6 +391,7 @@ export default function ShoppingList() {
                             completing={completingIds.includes(item.id)}
                             onToggle={togglePurchased}
                             onDelete={deleteItem}
+                            onEdit={openEditSheet}
                           />
                         ))}
                       </AnimatePresence>
@@ -368,6 +415,7 @@ export default function ShoppingList() {
                 completing={completingIds.includes(item.id)}
                 onToggle={togglePurchased}
                 onDelete={deleteItem}
+                onEdit={openEditSheet}
               />
             ))}
           </AnimatePresence>
@@ -592,6 +640,128 @@ export default function ShoppingList() {
           </>
         )}
       </AnimatePresence>
+
+      {/* 編集シート（追加シートと同じ部品・見た目） */}
+      <AnimatePresence>
+        {editingItem && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="sheet-overlay"
+              onClick={() => setEditingItem(null)}
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'tween', duration: 0.25 }}
+              className="sheet"
+            >
+              <div className="px-4 pt-4">
+                <div className="flex justify-between items-center mb-3">
+                  <button onClick={() => setEditingItem(null)} className="chip">
+                    閉じる
+                  </button>
+                  <span className="text-sm text-text-secondary font-medium">
+                    商品を編集
+                  </span>
+                  <div className="w-16" />
+                </div>
+
+                {/* 購入先チップ */}
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-sm text-text-secondary flex-shrink-0">購入先</span>
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
+                    {[...stores, '未設定'].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setEditStore(s === '未設定' ? '' : s)}
+                        className={`chip ${
+                          (s === '未設定' && !editStore) || editStore === s ? 'chip-active' : ''
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* カテゴリーチップ */}
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-sm text-text-secondary flex-shrink-0">分類</span>
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
+                    {categories.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setEditCategory(editCategory === c ? '' : c)}
+                        className={`chip chip-sm ${editCategory === c ? 'chip-active' : ''}`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 商品名入力 */}
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
+                      placeholder="商品名"
+                      autoFocus
+                      className="text-input"
+                    />
+                  </div>
+                  <button
+                    onClick={() => setShowEditMemo(!showEditMemo)}
+                    className={`flex items-center gap-1 border-2 border-text-primary rounded-full px-4 py-2.5 text-sm font-bold transition-colors ${
+                      showEditMemo ? 'bg-text-primary text-white' : 'text-text-primary bg-transparent'
+                    }`}
+                  >
+                    <MemoIcon size={16} />
+                    メモ
+                  </button>
+                  <button
+                    onClick={saveEdit}
+                    disabled={!editName.trim()}
+                    className="btn-brand px-5 py-2.5 text-sm"
+                  >
+                    保存
+                  </button>
+                </div>
+
+                {/* メモ入力 */}
+                <AnimatePresence>
+                  {showEditMemo && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <input
+                        type="text"
+                        value={editMemo}
+                        onChange={(e) => setEditMemo(e.target.value)}
+                        placeholder="メモ（例：2個、特売など）"
+                        className="text-input mb-3"
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* トースト */}
+      {toast && <div className="toast">{toast}</div>}
 
     </div>
   )

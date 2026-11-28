@@ -1,7 +1,7 @@
 // components/Layout.js - 下部3タブナビ（定期購入品 / 買い物リスト / マイページ）
 import { useRouter } from 'next/router'
 import { motion } from 'framer-motion'
-import { SwapIcon, CartIcon, UserIcon } from './Icons'
+import { SwapIcon, CartIcon, UserIcon, TodoIcon } from './Icons'
 
 export default function Layout({ children }) {
   const router = useRouter()
@@ -9,6 +9,7 @@ export default function Layout({ children }) {
   const tabs = [
     { path: '/recurring', icon: SwapIcon, label: '定期購入品' },
     { path: '/', icon: CartIcon, label: '買い物リスト', center: true },
+    { path: '/todos', icon: TodoIcon, label: 'やること' },
     { path: '/mypage', icon: UserIcon, label: 'マイページ' },
   ]
 

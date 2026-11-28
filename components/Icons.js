@@ -91,6 +91,19 @@ export function CartIcon({ size = 24, className = '' }) {
   )
 }
 
+export function TodoIcon({ size = 24, className = '' }) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M10 6h10" />
+      <path d="M10 12h10" />
+      <path d="M10 18h10" />
+      <path d="M3 5.5l1.5 1.5L7 4.5" />
+      <path d="M3 11.5l1.5 1.5L7 10.5" />
+      <path d="M3 17.5l1.5 1.5L7 16.5" />
+    </svg>
+  )
+}
+
 export function CheckIcon({ size = 16, className = '' }) {
   return (
     <svg {...base(size, className)} strokeWidth={3}>
